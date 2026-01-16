@@ -1,8 +1,500 @@
-/*
+/* Obsidian Todo Plugin - Premium Styles */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+:root {
+  --todo-accent: #7b61ff;
+  --todo-accent-soft: rgba(123, 97, 255, 0.1);
+  --todo-success: #2ecc71;
+  --todo-warning: #f1c40f;
+  --todo-danger: #e74c3c;
+  --todo-bg-soft: var(--background-secondary-alt);
+  --todo-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  --todo-radius: 12px;
+}
 
-If your plugin does not need CSS, delete this file.
+/* Container */
+.todo-list-container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  height: 100%;
+  overflow-y: auto;
+  font-family: var(--font-interface);
+  color: var(--text-normal);
+}
 
-*/
+/* Header Section */
+.todo-header {
+  margin-bottom: 30px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.todo-title {
+  font-size: 2em;
+  font-weight: 700;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.todo-stats {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+/* Progress Bar */
+.progress-container {
+  height: 8px;
+  background: var(--background-modifier-border);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-top: 10px;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--todo-accent), #a29bfe);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Add Button */
+.todo-add-btn {
+  background-color: var(--todo-accent);
+  color: white;
+  border: none;
+  padding: 10px 20px;
+  border-radius: var(--todo-radius);
+  cursor: pointer;
+  font-weight: 600;
+  transition: transform 0.2s, background-color 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  align-self: flex-end;
+}
+
+.todo-add-btn:hover {
+  background-color: #6a4dff;
+  transform: translateY(-2px);
+}
+
+.todo-add-btn:active {
+  transform: translateY(0);
+}
+
+/* Search Box */
+.todo-search {
+  position: relative;
+  margin-bottom: 20px;
+}
+
+.todo-search input {
+  width: 100%;
+  padding: 12px 40px 12px 15px;
+  border-radius: var(--todo-radius);
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 1em;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.todo-search input:focus {
+  border-color: var(--todo-accent);
+  box-shadow: 0 0 0 3px var(--todo-accent-soft);
+  outline: none;
+}
+
+.search-clear-btn {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 5px;
+}
+
+/* Filters */
+.todo-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 25px;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-btn:hover {
+  background: var(--todo-bg-soft);
+}
+
+.filter-btn.active {
+  background: var(--todo-accent);
+  color: white;
+  border-color: var(--todo-accent);
+}
+
+.clear-completed-btn {
+  margin-top: 20px;
+}
+
+/* Todo List & Items */
+.todo-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.todo-item {
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--todo-radius);
+  padding: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+  position: relative;
+}
+
+.todo-item:hover {
+  transform: translateX(4px);
+  box-shadow: var(--todo-shadow);
+  border-color: var(--todo-accent);
+}
+
+.todo-item.completed {
+  opacity: 0.6;
+}
+
+.todo-item.completed .todo-item-title {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.todo-item-checkbox {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid var(--background-modifier-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.todo-item.completed .todo-item-checkbox {
+  background-color: var(--todo-success);
+  border-color: var(--todo-success);
+}
+
+.todo-item-content {
+  flex-grow: 1;
+}
+
+.todo-item-title {
+  font-weight: 600;
+  font-size: 1.1em;
+  margin-bottom: 4px;
+}
+
+.todo-item-desc {
+  font-size: 0.9em;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* Metadata (Tags, DueDate) */
+.todo-item-meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.todo-tag {
+  background: var(--todo-accent-soft);
+  color: var(--todo-accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.8em;
+  font-weight: 500;
+}
+
+.todo-due-date {
+  font-size: 0.8em;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.todo-item.overdue .todo-due-date {
+  color: var(--todo-danger);
+  font-weight: 600;
+}
+
+/* Priority Indicator */
+.priority-indicator {
+  width: 4px;
+  height: calc(100% - 32px);
+  position: absolute;
+  left: 0;
+  top: 16px;
+  border-radius: 0 4px 4px 0;
+}
+
+.priority-high {
+  background-color: var(--todo-danger);
+}
+
+.priority-medium {
+  background-color: var(--todo-warning);
+}
+
+.priority-low {
+  background-color: var(--todo-success);
+}
+
+/* Actions */
+.todo-item-actions {
+  display: flex;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.todo-item:hover .todo-item-actions {
+  opacity: 1;
+}
+
+.action-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.action-btn:hover {
+  background: var(--background-modifier-border);
+  color: var(--text-normal);
+}
+
+.delete-btn:hover {
+  color: var(--todo-danger);
+  background: rgba(231, 76, 60, 0.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 600px) {
+  .todo-list-container {
+    padding: 20px 10px;
+  }
+
+  .todo-title {
+    font-size: 1.5em;
+  }
+}
+
+/* Modal Styling */
+.modal {
+  border-radius: var(--todo-radius) !important;
+  padding: 24px !important;
+  max-width: 500px !important;
+}
+
+.modal h2 {
+  margin-top: 0;
+  margin-bottom: 24px;
+  font-weight: 700;
+  color: var(--text-normal);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 12px;
+}
+
+.modal-field {
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-field label {
+  font-weight: 600;
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
+.modal-field input[type="text"],
+.modal-field input[type="date"],
+.modal-field textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.modal-field input:focus,
+.modal-field textarea:focus {
+  border-color: var(--todo-accent);
+  box-shadow: 0 0 0 2px var(--todo-accent-soft);
+  outline: none;
+}
+
+.priority-btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+.priority-btn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.priority-btn:hover {
+  background: var(--todo-bg-soft);
+}
+
+.priority-btn.active {
+  border-color: var(--todo-accent);
+  background: var(--todo-accent-soft);
+  color: var(--todo-accent);
+  font-weight: 600;
+}
+
+.modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.modal-btn {
+  padding: 10px 24px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 14px;
+  transition: all 0.2s;
+}
+
+.modal-btn.cancel {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.modal-btn.cancel:hover {
+  background: var(--todo-bg-soft);
+  color: var(--text-normal);
+}
+
+.modal-btn.submit {
+  background: var(--todo-accent);
+  color: white;
+  border: none;
+}
+
+.modal-btn.submit:hover {
+  background-color: #6a4dff;
+  box-shadow: 0 4px 12px rgba(123, 97, 255, 0.3);
+}
+
+/* File Picker inside Modal */
+.note-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.note-selector input {
+  flex: 1;
+}
+
+.note-select-btn {
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  cursor: pointer;
+  font-size: 1.2em;
+}
+
+.note-picker-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--todo-radius);
+  padding: 24px;
+  z-index: 1000;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+  width: 400px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-file-list {
+  margin-top: 12px;
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+}
+
+.note-file-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  border-bottom: 1px solid var(--background-modifier-outline);
+  transition: background 0.2s;
+}
+
+.note-file-item:hover {
+  background: var(--todo-accent-soft);
+  color: var(--todo-accent);
+}
+
+.picker-close-btn {
+  margin-top: 16px;
+  align-self: flex-end;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  cursor: pointer;
+}
