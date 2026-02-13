@@ -1,6 +1,8 @@
-import { App, Modal, Notice, TFile } from 'obsidian';
+import { App, Modal, Notice, TFile, MarkdownRenderer, Component } from 'obsidian';
 import { TodoService } from '../services/TodoService';
 import { Priority } from '../types';
+import { parseTasksFormat, mapTasksPriorityToPluginPriority } from '../utils/tasksParser';
+import { TasksSuggester } from '../suggests/TasksSuggester';
 
 export class EditTodoModal extends Modal {
   private todoService: TodoService;
@@ -15,10 +17,18 @@ export class EditTodoModal extends Modal {
   private tagsInput: string = '';
   private linkedNote: string = '';
 
+  // UI Elements
+  private priorityBtns: HTMLElement[] = [];
+  private dateInput: HTMLInputElement | null = null;
+  private tasksSuggester: TasksSuggester | null = null;
+  private previewEl: HTMLElement;
+  private component: Component;
+
   constructor(app: App, todoService: TodoService, todoId: string) {
     super(app);
     this.todoService = todoService;
     this.todoId = todoId;
+    this.component = new Component();
   }
 
   async onOpen(): Promise<void> {
@@ -49,20 +59,28 @@ export class EditTodoModal extends Modal {
   onClose(): void {
     const { contentEl } = this;
     contentEl.empty();
+    this.component.unload();
   }
 
   private render(contentEl: HTMLElement): void {
     contentEl.createEl('h2', { text: '编辑待办事项' });
 
     // 标题
-    this.createTextField(contentEl, '标题', 'todo-title-input', '输入待办事项...', (value) => {
+    this.createTextField(contentEl, '标题', 'todo-title-input', '输入待办事项... (支持 Tasks 格式: 🔺 📅)', (value) => {
       this.title = value;
-    }, this.title);
+      this.renderPreview();
+    }, this.title, true);
 
     // 描述
-    this.createTextArea(contentEl, '描述 (可选)', 'todo-desc-input', '添加详细描述...', (value) => {
+    this.createTextArea(contentEl, '描述 (可选)', 'todo-desc-input', '添加详细描述... (支持 Tasks 格式)', (value) => {
       this.description = value;
-    }, this.description);
+      this.renderPreview();
+    }, this.description, true);
+
+    // 预览区域
+    contentEl.createEl('h3', { text: '预览' });
+    this.previewEl = contentEl.createDiv({ cls: 'todo-preview markdown-preview-view' });
+    this.renderPreview();
 
     // 优先级
     this.createPrioritySelect(contentEl);
@@ -86,7 +104,8 @@ export class EditTodoModal extends Modal {
     cls: string,
     placeholder: string,
     onChange: (value: string) => void,
-    defaultValue?: string
+    defaultValue?: string,
+    isTitle: boolean = false
   ): void {
     const container = parent.createDiv({ cls: 'modal-field' });
 
@@ -104,6 +123,9 @@ export class EditTodoModal extends Modal {
 
     input.addEventListener('input', (e: Event) => {
       const target = e.target as HTMLInputElement;
+      if (isTitle) {
+        this.handleInputParsing(target.value);
+      }
       onChange(target.value);
     });
 
@@ -121,7 +143,8 @@ export class EditTodoModal extends Modal {
     cls: string,
     placeholder: string,
     onChange: (value: string) => void,
-    defaultValue?: string
+    defaultValue?: string,
+    isDescription: boolean = false
   ): void {
     const container = parent.createDiv({ cls: 'modal-field' });
 
@@ -139,8 +162,20 @@ export class EditTodoModal extends Modal {
 
     textarea.addEventListener('input', (e: Event) => {
       const target = e.target as HTMLTextAreaElement;
+
+      if (isDescription) {
+        this.handleInputParsing(target.value);
+      }
+
       onChange(target.value);
     });
+
+    // 初始化 Suggester
+    if (isDescription) {
+      setTimeout(() => {
+        this.tasksSuggester = new TasksSuggester(this.app, textarea, container);
+      }, 0);
+    }
   }
 
   private createPrioritySelect(parent: HTMLElement): void {
@@ -149,6 +184,7 @@ export class EditTodoModal extends Modal {
     container.createEl('label', { text: '优先级' });
 
     const btnGroup = container.createDiv({ cls: 'priority-btn-group' });
+    this.priorityBtns = [];
 
     const priorities: { value: Priority; label: string }[] = [
       { value: 'high', label: '🔴 高' },
@@ -161,13 +197,24 @@ export class EditTodoModal extends Modal {
         cls: `priority-btn ${this.priority === value ? 'active' : ''}`,
         text: label
       });
+      this.priorityBtns.push(btn);
 
       btn.addEventListener('click', () => {
-        this.priority = value;
-        btnGroup.findAll('.priority-btn').forEach(b => b.removeClass('active'));
-        btn.addClass('active');
+        this.setPriority(value);
       });
     });
+  }
+
+  private setPriority(value: Priority): void {
+    this.priority = value;
+    this.priorityBtns.forEach(btn => {
+      btn.removeClass('active');
+    });
+
+    const index = ['high', 'medium', 'low'].indexOf(value);
+    if (index !== -1 && this.priorityBtns[index]) {
+      this.priorityBtns[index].addClass('active');
+    }
   }
 
   private createDateField(parent: HTMLElement): void {
@@ -179,6 +226,7 @@ export class EditTodoModal extends Modal {
       type: 'date',
       cls: 'todo-due-date-input'
     });
+    this.dateInput = input;
 
     if (this.dueDate) {
       input.value = this.dueDate;
@@ -327,9 +375,19 @@ export class EditTodoModal extends Modal {
     const dueDate = this.dueDate ? new Date(this.dueDate).toISOString() : undefined;
 
     try {
+      // 解析标题和描述中的 Tasks 格式并清理
+      const titleParseResult = parseTasksFormat(this.title.trim());
+      const finalTitle = titleParseResult.cleanDescription;
+
+      let finalDescription = this.description.trim();
+      if (finalDescription) {
+        const descParseResult = parseTasksFormat(finalDescription);
+        finalDescription = descParseResult.cleanDescription;
+      }
+
       await this.todoService.updateTodo(this.todoId, {
-        title: this.title.trim(),
-        description: this.description.trim() || undefined,
+        title: finalTitle,
+        description: finalDescription || undefined,
         priority: this.priority,
         dueDate,
         tags,
@@ -342,5 +400,81 @@ export class EditTodoModal extends Modal {
       console.error('Failed to update todo:', error);
       new Notice('❌ 更新待办事项失败');
     }
+  }
+
+  /**
+   * 处理输入，解析 Tasks 格式
+   */
+  private handleInputParsing(value: string): void {
+    const result = parseTasksFormat(value);
+
+    if (result.hasTasksFormat) {
+      if (result.priority !== 'none') {
+        const priority = mapTasksPriorityToPluginPriority(result.priority);
+        this.setPriority(priority);
+      }
+
+      if (result.dueDate) {
+        this.dueDate = result.dueDate;
+        if (this.dateInput) {
+          this.dateInput.value = result.dueDate;
+        }
+      }
+    }
+  }
+
+  /**
+   * 渲染预览
+   */
+  private async renderPreview(): Promise<void> {
+    if (!this.previewEl) return;
+
+    this.previewEl.empty();
+
+    const fullContent = [
+      `- [ ] ${this.title || '标题'}`,
+      this.description || ''
+    ].join('\n\n');
+
+    await MarkdownRenderer.render(
+      this.app,
+      fullContent,
+      this.previewEl,
+      '',
+      this.component
+    );
+
+    // 处理复选框点击
+    const checkboxes = this.previewEl.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach((checkbox, index) => {
+      checkbox.addEventListener('click', (e) => {
+        e.preventDefault();
+
+        // 如果是 Description 里的:
+        const descLines = this.description.split('\n');
+
+        if (index === 0) {
+          return;
+        }
+
+        let matchCount = 0;
+        let newDesc = this.description;
+
+        newDesc = newDesc.replace(/- \[( |x|X)\]/g, (match) => {
+          matchCount++;
+          if (matchCount === index) {
+            return match.includes('x') || match.includes('X') ? '- [ ]' : '- [x]';
+          }
+          return match;
+        });
+
+        if (newDesc !== this.description) {
+          this.description = newDesc;
+          const textarea = this.contentEl.querySelector('.todo-desc-input') as HTMLTextAreaElement;
+          if (textarea) textarea.value = newDesc;
+          this.renderPreview();
+        }
+      });
+    });
   }
 }

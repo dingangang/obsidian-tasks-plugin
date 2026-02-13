@@ -1,4 +1,4 @@
-import { App, ItemView, WorkspaceLeaf, setIcon, Notice, TFile } from 'obsidian';
+import { App, ItemView, WorkspaceLeaf, setIcon, Notice, TFile, MarkdownRenderer } from 'obsidian';
 import { TodoService } from '../services/TodoService';
 import { TodoItemModel } from '../models/TodoItem';
 import { TodoPluginSettings, ViewMode } from '../types';
@@ -245,14 +245,22 @@ export class TodoListView extends ItemView {
     // 内容区域
     const content = item.createDiv({ cls: 'todo-item-content' });
 
-    const title = content.createDiv({ cls: 'todo-item-title' });
-    title.textContent = todo.title;
-    title.addEventListener('click', () => this.openEditModal(todo.id));
+    // Title with Markdown & Click-to-Edit
+    this.renderEditableMarkdown(content, todo.title, 'todo-item-title', true, async (newTitle) => {
+      if (newTitle !== todo.title) {
+        await this.todoService.updateTodo(todo.id, { title: newTitle });
+        // Refresh is handled by service event, but for smooth UX we might want to just re-render this item?
+        // For now, rely on global refresh.
+      }
+    });
 
-    // 描述
+    // Description with Markdown & Click-to-Edit
     if (todo.description) {
-      const desc = content.createDiv({ cls: 'todo-item-desc' });
-      desc.textContent = todo.description;
+      this.renderEditableMarkdown(content, todo.description, 'todo-item-desc', false, async (newDesc) => {
+        if (newDesc !== todo.description) {
+          await this.todoService.updateTodo(todo.id, { description: newDesc });
+        }
+      });
     }
 
     // 元信息
@@ -362,5 +370,141 @@ export class TodoListView extends ItemView {
     } else {
       new Notice('❌ 笔记文件不存在');
     }
+  }
+
+  /**
+   * 渲染可编辑的 Markdown 区域
+   */
+  private renderEditableMarkdown(
+    parent: HTMLElement,
+    content: string,
+    cls: string,
+    isTitle: boolean,
+    onSave: (newContent: string) => Promise<void>
+  ): void {
+    const container = parent.createDiv({ cls: `todo-editable-container ${cls}` });
+
+    // View Element (Markdown)
+    const viewEl = container.createDiv({ cls: 'todo-markdown-view' });
+
+
+    // Editor Element (Textarea/Input)
+    // start hidden
+    const editorContainer = container.createDiv({ cls: 'todo-input-editor' });
+    editorContainer.style.display = 'none';
+
+    let input: HTMLInputElement | HTMLTextAreaElement;
+
+    if (isTitle) {
+      input = editorContainer.createEl('input', { type: 'text', value: content });
+    } else {
+      input = editorContainer.createEl('textarea', { text: content });
+    }
+
+    // Toggle Logic
+    const switchToEdit = () => {
+      viewEl.style.display = 'none';
+      editorContainer.style.display = 'block';
+      input.value = content; // reset value
+      input.focus();
+    };
+
+    const switchToView = () => {
+      viewEl.style.display = 'block';
+      editorContainer.style.display = 'none';
+    };
+
+    const save = async () => {
+      const newVal = input.value;
+      switchToView();
+      if (newVal !== content) {
+        await onSave(newVal);
+      }
+    };
+
+    // Event Listeners for View
+    viewEl.addEventListener('click', (e) => {
+      e.stopPropagation(); // prevent triggering item click if any
+
+      const target = e.target as HTMLElement;
+      if (target instanceof HTMLInputElement && target.type === 'checkbox') {
+        // Clicked on a rendered checkbox
+        // console.log('Checkbox clicked', target);
+
+        // We do NOT preventDefault immediately if we want to see the visual change, 
+        // but since we rely on re-rendering, preventing it is safer to avoid desync
+        // untill the re-render happens.
+        // However, if we don't preventDefault, the box checks, then we save, then we re-render [x].
+        // If we preventDefault, the box stays unchecked, we save, we re-render [x].
+        // Let's keep preventDefault to be safe against double-toggles if logic is weird.
+        // e.preventDefault(); 
+
+        // Toggle logic for checkbox inside markdown
+        // We need to find which checkbox it is relative to the viewEl
+        const checkboxes = Array.from(viewEl.querySelectorAll('input[type="checkbox"]'));
+        const index = checkboxes.indexOf(target);
+
+        if (index !== -1) {
+          let matchCount = 0;
+          let newContent = content;
+          newContent = newContent.replace(/- \[( |x|X)\]/g, (match) => {
+            if (matchCount === index) {
+              return match.includes('x') || match.includes('X') ? '- [ ]' : '- [x]';
+            }
+            matchCount++;
+            return match;
+          });
+
+          if (newContent !== content) {
+            onSave(newContent);
+          }
+        }
+      } else {
+        // Clicked on text -> Edit
+        // But check if we are clicking a link?
+        if (target.tagName === 'A') {
+          // Link click, let it flow (MarkdownRenderer handles it usually)
+          return;
+        }
+        switchToEdit();
+      }
+    });
+
+    // Render Markdown and enable checkboxes
+    MarkdownRenderer.render(this.app, content, viewEl, '', this).then(() => {
+      const checkboxes = viewEl.querySelectorAll('input[type="checkbox"]');
+      checkboxes.forEach((cb) => {
+        if (cb instanceof HTMLInputElement) {
+          cb.removeAttribute('disabled');
+          cb.classList.add('task-list-item-checkbox');
+          // Ensure interactions are caught
+          cb.style.cursor = 'pointer';
+        }
+      });
+    });
+
+    // Event Listeners for Input
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', (e: KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        if (isTitle) {
+          e.preventDefault(); // prevent parsing newline for input
+          input.blur(); // trigger save
+        } else {
+          // For description (textarea), Enter = newline, Ctrl+Enter = save?
+          // Or just let blur handle it.
+          if (e.ctrlKey || e.metaKey) {
+            input.blur();
+          }
+        }
+      }
+      if (e.key === 'Escape') {
+        switchToView(); // cancel
+      }
+      e.stopPropagation();
+    });
+
+    // Stop propagation on editor container click to prevent closing or other effects
+    editorContainer.addEventListener('click', (e) => e.stopPropagation());
   }
 }

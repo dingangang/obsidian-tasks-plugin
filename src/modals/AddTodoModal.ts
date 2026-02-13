@@ -1,6 +1,8 @@
-import { App, Modal, Notice, TFile } from 'obsidian';
+import { App, Modal, Notice, TFile, MarkdownRenderer, Component } from 'obsidian';
 import { TodoService } from '../services/TodoService';
 import { TodoPluginSettings, Priority } from '../types';
+import { parseTasksFormat, mapTasksPriorityToPluginPriority } from '../utils/tasksParser';
+import { TasksSuggester } from '../suggests/TasksSuggester';
 
 export class AddTodoModal extends Modal {
   private todoService: TodoService;
@@ -14,10 +16,18 @@ export class AddTodoModal extends Modal {
   private tagsInput: string = '';
   private linkedNote: string = '';
 
+  // UI Elements
+  private priorityBtns: HTMLElement[] = [];
+  private dateInput: HTMLInputElement | null = null;
+  private tasksSuggester: TasksSuggester | null = null;
+  private previewEl: HTMLElement;
+  private component: Component;
+
   constructor(app: App, todoService: TodoService, settings: TodoPluginSettings) {
     super(app);
     this.todoService = todoService;
     this.settings = settings;
+    this.component = new Component();
   }
 
   async onOpen(): Promise<void> {
@@ -33,20 +43,28 @@ export class AddTodoModal extends Modal {
   onClose(): void {
     const { contentEl } = this;
     contentEl.empty();
+    this.component.unload();
   }
 
   private render(contentEl: HTMLElement): void {
     contentEl.createEl('h2', { text: '添加待办事项' });
 
     // 标题
-    this.createTextField(contentEl, '标题', 'todo-title-input', '输入待办事项...', (value) => {
+    this.createTextField(contentEl, '标题', 'todo-title-input', '输入待办事项... (支持 Tasks 格式: 🔺 📅)', (value) => {
       this.title = value;
-    });
+      this.renderPreview();
+    }, true);
 
     // 描述
-    this.createTextArea(contentEl, '描述 (可选)', 'todo-desc-input', '添加详细描述...', (value) => {
+    this.createTextArea(contentEl, '描述 (可选)', 'todo-desc-input', '添加详细描述... (支持 Tasks 格式)', (value) => {
       this.description = value;
-    });
+      this.renderPreview();
+    }, true);
+
+    // 预览区域
+    contentEl.createEl('h3', { text: '预览' });
+    this.previewEl = contentEl.createDiv({ cls: 'todo-preview markdown-preview-view' });
+    this.renderPreview();
 
     // 优先级
     this.createPrioritySelect(contentEl);
@@ -69,7 +87,8 @@ export class AddTodoModal extends Modal {
     label: string,
     cls: string,
     placeholder: string,
-    onChange: (value: string) => void
+    onChange: (value: string) => void,
+    isTitle: boolean = false
   ): void {
     const container = parent.createDiv({ cls: 'modal-field' });
 
@@ -83,7 +102,12 @@ export class AddTodoModal extends Modal {
 
     input.addEventListener('input', (e: Event) => {
       const target = e.target as HTMLInputElement;
-      onChange(target.value);
+      const value = target.value;
+
+      if (isTitle) {
+        this.handleInputParsing(target.value);
+      }
+      onChange(value);
     });
 
     // 回车提交
@@ -99,7 +123,8 @@ export class AddTodoModal extends Modal {
     label: string,
     cls: string,
     placeholder: string,
-    onChange: (value: string) => void
+    onChange: (value: string) => void,
+    isDescription: boolean = false
   ): void {
     const container = parent.createDiv({ cls: 'modal-field' });
 
@@ -113,8 +138,21 @@ export class AddTodoModal extends Modal {
 
     textarea.addEventListener('input', (e: Event) => {
       const target = e.target as HTMLTextAreaElement;
+
+      if (isDescription) {
+        this.handleInputParsing(target.value);
+      }
+
       onChange(target.value);
     });
+
+    // 初始化 Suggester
+    if (isDescription) {
+      // 确保 textarea 已挂载
+      setTimeout(() => {
+        this.tasksSuggester = new TasksSuggester(this.app, textarea, container);
+      }, 0);
+    }
   }
 
   private createPrioritySelect(parent: HTMLElement): void {
@@ -123,6 +161,7 @@ export class AddTodoModal extends Modal {
     container.createEl('label', { text: '优先级' });
 
     const btnGroup = container.createDiv({ cls: 'priority-btn-group' });
+    this.priorityBtns = [];
 
     const priorities: { value: Priority; label: string; color: string }[] = [
       { value: 'high', label: '🔴 高', color: '#ff6b6b' },
@@ -135,14 +174,24 @@ export class AddTodoModal extends Modal {
         cls: `priority-btn ${this.priority === value ? 'active' : ''}`,
         text: label
       });
+      this.priorityBtns.push(btn);
 
       btn.addEventListener('click', () => {
-        this.priority = value;
-        // 更新按钮状态
-        btnGroup.findAll('.priority-btn').forEach(b => b.removeClass('active'));
-        btn.addClass('active');
+        this.setPriority(value);
       });
     });
+  }
+
+  private setPriority(value: Priority): void {
+    this.priority = value;
+    this.priorityBtns.forEach(btn => {
+      btn.removeClass('active');
+    });
+
+    const index = ['high', 'medium', 'low'].indexOf(value);
+    if (index !== -1 && this.priorityBtns[index]) {
+      this.priorityBtns[index].addClass('active');
+    }
   }
 
   private createDateField(parent: HTMLElement): void {
@@ -154,6 +203,7 @@ export class AddTodoModal extends Modal {
       type: 'date',
       cls: 'todo-due-date-input'
     });
+    this.dateInput = input;
 
     input.addEventListener('input', (e: Event) => {
       const target = e.target as HTMLInputElement;
@@ -301,11 +351,20 @@ export class AddTodoModal extends Modal {
     // 格式化截止日期
     const dueDate = this.dueDate ? new Date(this.dueDate).toISOString() : undefined;
 
-    // 添加待办事项
     try {
+      // 解析标题和描述中的 Tasks 格式并清理
+      const titleParseResult = parseTasksFormat(this.title.trim());
+      const finalTitle = titleParseResult.cleanDescription;
+
+      let finalDescription = this.description.trim();
+      if (finalDescription) {
+        const descParseResult = parseTasksFormat(finalDescription);
+        finalDescription = descParseResult.cleanDescription;
+      }
+
       await this.todoService.addTodo({
-        title: this.title.trim(),
-        description: this.description.trim() || undefined,
+        title: finalTitle,
+        description: finalDescription || undefined,
         priority: this.priority,
         dueDate,
         tags,
@@ -318,5 +377,113 @@ export class AddTodoModal extends Modal {
       console.error('Failed to add todo:', error);
       new Notice('❌ 添加待办事项失败');
     }
+  }
+
+  /**
+   * 处理输入，解析 Tasks 格式
+   */
+  private handleInputParsing(value: string): void {
+    const result = parseTasksFormat(value);
+
+    if (result.hasTasksFormat) {
+      if (result.priority !== 'none') {
+        const priority = mapTasksPriorityToPluginPriority(result.priority);
+        this.setPriority(priority);
+      }
+
+      if (result.dueDate) {
+        this.dueDate = result.dueDate;
+        if (this.dateInput) {
+          this.dateInput.value = result.dueDate;
+        }
+      }
+    }
+  }
+
+  /**
+   * 渲染预览
+   */
+  private async renderPreview(): Promise<void> {
+    if (!this.previewEl) return;
+
+    this.previewEl.empty();
+
+    const fullContent = [
+      `- [ ] ${this.title || '标题'}`,
+      this.description || ''
+    ].join('\n\n');
+
+    await MarkdownRenderer.render(
+      this.app,
+      fullContent,
+      this.previewEl,
+      '',
+      this.component
+    );
+
+    // 处理复选框点击
+    const checkboxes = this.previewEl.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach((checkbox, index) => {
+      // 第一个是标题的 checkbox（我们需要忽略它，因为我们在 Modal 里不让通过点击 checkbox 来完成新建）
+      // 或者我们可以让它 sync 回去？
+      // 用户想在“新建”时就看到效果。如果用户点击了标题的 checkbox，理论上也可以改 title 为 `- [x]`
+      // 但这里我们简单起见，主要针对 description 里的 checkbox
+
+      checkbox.addEventListener('click', (e) => {
+        e.preventDefault(); // 阻止默认行为，防止闪烁
+        const target = e.target as HTMLInputElement;
+        const isChecked = target.checked; // 这里的 checked 其实是点击后的状态（browser 处理后）
+        // 实际上对于 MarkdownRenderer 渲染的 checkbox，点击通常不会改变 DOM 状态，因为它是 static 的
+        // 我们需要根据点击位置来判断
+
+        // 简单实现：我们假设 description 里的 `- [ ]` 是用户想点的
+        // 这个实现在 preview 模式下比较 tricky，因为我们需要 map 回 source
+        // 简单版本：只通过 regex 替换
+
+        // 但用户需求是: 能够支持将“- [ ]” 渲染成复选框
+        // 我们至少要渲染出来。交互可能在 Add 阶段不是必须，但为了体验最好由交互。
+
+        // 让我们实现一个简单的 toggle 逻辑：
+        // 如果用户点了 description 里的 checkbox，我们尝试 toggle 对应文本
+
+        // 由于定位太麻烦，我们这里只做展示 Render 即可，或者简单提示。
+        // 但用户说 "输入“- [ ]”时，会激活语法将输入文本变成可点击的选择框"
+
+        // 实际上，如果只是 render 出来，用户点一下没反应会很奇怪。
+        // 让我们尝试做简单的 text replacement
+
+        // 如果是 Description 里的:
+        const descLines = this.description.split('\n');
+        // 这是一个极其简化的 mapping，假设 checkbox 顺序对应 lines 里的 `-[ ]` 顺序
+        // 标题占了一个 checkbox
+
+        if (index === 0) {
+          // 标题的 checkbox，暂时忽略或者处理
+          // 我们的 title 字段通常不包含 `- [ ]` 前缀，那是为了 preview 加上去的
+          return;
+        }
+
+        // description checkboxes
+        // 找到第 index - 1 个 checkbox 在 description 里的位置
+        let matchCount = 0;
+        let newDesc = this.description;
+
+        newDesc = newDesc.replace(/- \[( |x|X)\]/g, (match) => {
+          matchCount++;
+          if (matchCount === index) { // index 0 is title, so index 1 is first desc checkbox
+            return match.includes('x') || match.includes('X') ? '- [ ]' : '- [x]';
+          }
+          return match;
+        });
+
+        if (newDesc !== this.description) {
+          this.description = newDesc;
+          // 更新 textarea
+          const textarea = this.contentEl.querySelector('.todo-desc-input') as HTMLTextAreaElement;
+          if (textarea) textarea.value = newDesc;
+          this.renderPreview();
+        }
+      });
+    });
   }
 }
