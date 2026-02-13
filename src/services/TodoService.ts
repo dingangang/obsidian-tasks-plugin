@@ -1,6 +1,15 @@
-import { TFile, App, Notice, TFolder, TAbstractFile } from 'obsidian';
+import { App, Notice } from 'obsidian';
 import { TodoItemModel } from '../models/TodoItem';
 import { TodoItem, TodoPluginSettings, Priority } from '../types';
+
+/**
+ * JSON 数据文件格式
+ */
+interface TodoDataFile {
+  version: string;
+  lastModified: string;
+  todos: TodoItem[];
+}
 
 /**
  * 待办事项服务类
@@ -10,7 +19,6 @@ export class TodoService {
   private app: App;
   private settings: TodoPluginSettings;
   private todos: TodoItemModel[] = [];
-  private dataFile: TFile | null = null;
   private onUpdateCallbacks: (() => void)[] = [];
 
   constructor(app: App, settings: TodoPluginSettings) {
@@ -225,47 +233,32 @@ export class TodoService {
    */
   private async loadFromFile(): Promise<void> {
     try {
-      const vault = this.app.vault;
-      const filePath = this.settings.todoFilePath;
+      const dataPath = this.getDataFilePath();
 
-      // 1. 尝试直接获取文件
-      let abstractFile = vault.getAbstractFileByPath(filePath);
-      let file: TFile | null = null;
-
-      if (abstractFile instanceof TFile) {
-        file = abstractFile;
-      } else {
-        // 2. 尝试不区分大小写查找
-        const allFiles = vault.getFiles();
-        file = allFiles.find(f => f.path.toLowerCase() === filePath.toLowerCase()) || null;
+      // 尝试读取主数据文件
+      try {
+        const content = await this.app.vault.adapter.read(dataPath);
+        const data = JSON.parse(content) as TodoDataFile;
+        this.todos = data.todos.map(item => TodoItemModel.fromObject(item));
+        console.log(`📋 Loaded ${this.todos.length} todos from ${dataPath}`);
+        return;
+      } catch (error) {
+        console.warn('Failed to load main data file, attempting backup recovery:', error);
       }
 
-      // 3. 如果还是找不到，尝试创建
-      if (!file) {
-        await this.createDefaultFile();
-        abstractFile = vault.getAbstractFileByPath(filePath);
-        if (abstractFile instanceof TFile) {
-          file = abstractFile;
-        } else {
-          // 再次兜底
-          const allFiles = vault.getFiles();
-          file = allFiles.find(f => f.path.toLowerCase() === filePath.toLowerCase()) || null;
-        }
+      // 主文件读取失败，尝试从备份恢复
+      const restored = await this.restoreFromBackup();
+      if (restored) {
+        new Notice('✅ 从备份恢复数据成功');
+        return;
       }
 
-      // 4. 加载数据
-      if (file) {
-        this.dataFile = file;
-        const content = await vault.read(file);
-        const data = this.parseContent(content);
-        this.todos = data.map(item => TodoItemModel.fromObject(item));
-        console.log(`📋 Loaded ${this.todos.length} todos from ${file.path}`);
-      } else {
-        console.error(`📋 Could not find or create todo file at ${filePath}`);
-        this.todos = [];
-      }
+      // 备份恢复失败，创建空数据文件
+      console.log('📋 No valid data found, creating new data file');
+      await this.createDefaultFile();
+      this.todos = [];
     } catch (error) {
-      console.error('Failed to load todos from file:', error);
+      console.error('Failed to load todos:', error);
       this.todos = [];
     }
   }
@@ -275,20 +268,20 @@ export class TodoService {
    */
   private async saveToFile(): Promise<void> {
     try {
-      if (!this.dataFile) {
-        await this.createDefaultFile();
-        const file = this.app.vault.getAbstractFileByPath(this.settings.todoFilePath);
-        if (file instanceof TFile) {
-          this.dataFile = file;
-        }
-      }
+      // 先创建备份
+      await this.createBackup();
 
-      if (this.dataFile) {
-        const content = this.serializeContent();
-        await this.app.vault.modify(this.dataFile, content);
-      }
+      // 序列化并保存
+      const content = this.serializeContent();
+      const dataPath = this.getDataFilePath();
+
+      // 确保目录存在
+      await this.ensureDataDirectory();
+
+      // 写入文件
+      await this.app.vault.adapter.write(dataPath, content);
     } catch (error) {
-      console.error('Failed to save todos to file:', error);
+      console.error('Failed to save todos:', error);
       new Notice('❌ 保存待办事项失败: ' + (error.message || '未知错误'));
       throw error;
     }
@@ -298,31 +291,20 @@ export class TodoService {
    * 创建默认数据文件
    */
   private async createDefaultFile(): Promise<void> {
-    const vault = this.app.vault;
-    const filePath = this.settings.todoFilePath;
+    const dataPath = this.getDataFilePath();
 
-    // 检查父目录是否存在
-    const lastSlashIndex = filePath.lastIndexOf('/');
-    if (lastSlashIndex !== -1) {
-      const parentDir = filePath.substring(0, lastSlashIndex);
-      const parent = vault.getAbstractFileByPath(parentDir);
-      if (!parent) {
-        await vault.createFolder(parentDir);
-      } else if (!(parent instanceof TFolder)) {
-        throw new Error(`路径 ${parentDir} 已存在但不是文件夹`);
-      }
-    }
+    // 确保目录存在
+    await this.ensureDataDirectory();
 
-    // 再次确认文件是否真的不存在
-    const existingFile = vault.getAbstractFileByPath(filePath);
-    if (existingFile) {
-      if (existingFile instanceof TFile) return; // 已存在则直接返回
-      throw new Error(`路径 ${filePath} 已存在但不是文件`);
-    }
+    // 创建空数据文件
+    const emptyData: TodoDataFile = {
+      version: '1.0.0',
+      lastModified: new Date().toISOString(),
+      todos: []
+    };
 
-    const initialContent = this.serializeContent([]);
     try {
-      await vault.create(filePath, initialContent);
+      await this.app.vault.adapter.write(dataPath, JSON.stringify(emptyData, null, 2));
       new Notice('✅ 已创建待办事项数据文件');
     } catch (e) {
       if (e.message?.includes('already exists')) {
@@ -333,122 +315,82 @@ export class TodoService {
   }
 
   /**
-   * 序列化内容（YAML 格式）
+   * 序列化内容（JSON 格式）
    */
-  private serializeContent(todos?: TodoItem[]): string {
-    const items = todos || this.todos.map(t => t.toObject());
-    const yaml = items.map(todo => this.objectToYaml(todo)).join('\n---\n');
-    return `---\ntitle: 待办事项\ncreated: ${new Date().toISOString()}\n---\n\n${yaml}`;
-  }
-
-  /**
-   * 将对象转换为 YAML
-   */
-  private objectToYaml(obj: TodoItem): string {
-    const lines = ['id: ' + obj.id];
-    lines.push('title: ' + this.escapeYaml(obj.title));
-    if (obj.description) {
-      lines.push('description: ' + this.escapeYaml(obj.description));
-    }
-    lines.push('completed: ' + obj.completed);
-    lines.push('priority: ' + obj.priority);
-    if (obj.dueDate) {
-      lines.push('dueDate: ' + obj.dueDate);
-    }
-    if (obj.tags.length > 0) {
-      lines.push('tags: [' + obj.tags.map(t => `'${t}'`).join(', ') + ']');
-    }
-    if (obj.linkedNote) {
-      lines.push('linkedNote: ' + obj.linkedNote);
-    }
-    lines.push('createdAt: ' + obj.createdAt);
-    lines.push('updatedAt: ' + obj.updatedAt);
-    return lines.join('\n');
-  }
-
-  /**
-   * 解析文件内容
-   */
-  private parseContent(content: string): TodoItem[] {
-    const todos: TodoItem[] = [];
-    const blocks = content.split(/\r?\n---\r?\n/);
-
-    for (let i = 0; i < blocks.length; i++) {
-      const block = blocks[i].trim();
-      if (!block) continue;
-
-      if (!block.includes('id:') || !block.includes('title:')) {
-        continue;
-      }
-
-      const todo = this.yamlToObject(block);
-      if (todo) {
-        todos.push(todo);
-      }
-    }
-
-    return todos;
-  }
-
-  /**
-   * 简单 YAML 解析
-   */
-  private yamlToObject(yaml: string): TodoItem | null {
-    const lines = yaml.split('\n');
-    const result: Record<string, any> = {};
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-
-      const colonIndex = trimmed.indexOf(':');
-      if (colonIndex === -1) continue;
-
-      const key = trimmed.substring(0, colonIndex).trim();
-      let value: any = trimmed.substring(colonIndex + 1).trim();
-
-      // 处理值
-      if (value === 'true') value = true;
-      else if (value === 'false') value = false;
-      else if (value.startsWith('[') && value.endsWith(']')) {
-        const inner = value.slice(1, -1);
-        value = inner.split(',').map((s: string) => {
-          const trimmed = s.trim().replace(/^['"]|['"]$/g, '');
-          return trimmed;
-        }).filter((s: string) => Boolean(s));
-      }
-
-      result[key] = this.unescapeYaml(value);
-    }
-
-    if (!result.title) return null;
-
-    return {
-      id: result.id || Date.now().toString(),
-      title: result.title,
-      description: result.description || '',
-      completed: result.completed || false,
-      priority: result.priority || 'medium',
-      dueDate: result.dueDate,
-      tags: result.tags || [],
-      linkedNote: result.linkedNote,
-      createdAt: result.createdAt || new Date().toISOString(),
-      updatedAt: result.updatedAt || new Date().toISOString(),
+  private serializeContent(): string {
+    const data: TodoDataFile = {
+      version: '1.0.0',
+      lastModified: new Date().toISOString(),
+      todos: this.todos.map(t => t.toObject())
     };
+    return JSON.stringify(data, null, 2);
   }
 
   /**
-   * 反转义 YAML 字符串
+   * 获取数据文件路径
    */
-  private unescapeYaml(val: any): any {
-    if (typeof val !== 'string') return val;
-    return val.replace(/\\:/g, ':').replace(/\\n/g, '\n');
+  private getDataFilePath(): string {
+    return `${this.app.vault.configDir}/plugins/obsidian-tasks-plugin/data.json`;
   }
 
   /**
-   * 转义 YAML 字符串
+   * 获取备份文件路径
    */
-  private escapeYaml(str: string): string {
-    return str.replace(/:/g, '\\:').replace(/\n/g, '\\n');
+  private getBackupFilePath(): string {
+    return `${this.app.vault.configDir}/plugins/obsidian-tasks-plugin/data.json.bak`;
+  }
+
+  /**
+   * 创建备份文件
+   */
+  private async createBackup(): Promise<void> {
+    const dataPath = this.getDataFilePath();
+    const backupPath = this.getBackupFilePath();
+
+    try {
+      const content = await this.app.vault.adapter.read(dataPath);
+      await this.app.vault.adapter.write(backupPath, content);
+    } catch (e) {
+      console.warn('Failed to create backup:', e);
+    }
+  }
+
+  /**
+   * 从备份恢复数据
+   */
+  private async restoreFromBackup(): Promise<boolean> {
+    const backupPath = this.getBackupFilePath();
+
+    try {
+      const content = await this.app.vault.adapter.read(backupPath);
+      const data = JSON.parse(content) as TodoDataFile;
+      this.todos = data.todos.map(item => TodoItemModel.fromObject(item));
+
+      // 恢复成功后，重新保存到主文件
+      await this.ensureDataDirectory();
+      const dataPath = this.getDataFilePath();
+      await this.app.vault.adapter.write(dataPath, content);
+
+      console.log(`📋 Restored ${this.todos.length} todos from backup`);
+      return true;
+    } catch (e) {
+      console.warn('Failed to restore from backup:', e);
+      return false;
+    }
+  }
+
+  /**
+   * 确保数据目录存在
+   */
+  private async ensureDataDirectory(): Promise<void> {
+    const dir = `${this.app.vault.configDir}/plugins/obsidian-tasks-plugin`;
+
+    try {
+      // 检查目录是否存在（尝试读取，失败则说明不存在）
+      await this.app.vault.adapter.list(dir);
+    } catch (e) {
+      // 目录不存在，创建它
+      await this.app.vault.adapter.mkdir(dir);
+    }
   }
 }

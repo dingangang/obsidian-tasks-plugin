@@ -22,8 +22,8 @@ export class TodoSettingTab extends PluginSettingTab {
     // 统计信息
     this.renderStatistics(containerEl);
 
-    // 数据文件设置
-    this.renderDataFileSettings(containerEl);
+    // 数据存储信息
+    this.renderDataStorageInfo(containerEl);
 
     // 默认设置
     this.renderDefaultSettings(containerEl);
@@ -73,32 +73,26 @@ export class TodoSettingTab extends PluginSettingTab {
   }
 
   /**
-   * 渲染数据文件设置
+   * 渲染数据存储信息
    */
-  private renderDataFileSettings(containerEl: HTMLElement): void {
+  private renderDataStorageInfo(containerEl: HTMLElement): void {
     const settingsContainer = containerEl.createDiv({ cls: 'settings-group' });
     settingsContainer.createEl('h3', { text: '💾 数据存储' });
 
-    new Setting(settingsContainer)
-      .setName('数据文件路径')
-      .setDesc('待办事项数据保存的文件路径')
-      .addText(text => text
-        .setPlaceholder('Todos.md')
-        .setValue(this.plugin.settings.todoFilePath)
-        .onChange(async (value) => {
-          if (value && value.trim()) {
-            this.plugin.settings.todoFilePath = value.trim();
-            await this.plugin.saveSettings();
+    const configDir = this.app.vault.configDir;
+    const dataPath = `${configDir}/plugins/obsidian-tasks-plugin/data.json`;
+    const backupPath = `${configDir}/plugins/obsidian-tasks-plugin/data.json.bak`;
 
-            // 重新初始化服务
-            const todoService = (this.plugin as any).todoService;
-            if (todoService) {
-              await todoService.initialize();
-              this.display();
-              new Notice('✅ 数据文件路径已更新');
-            }
-          }
-        }));
+    settingsContainer.createEl('p', {
+      text: `数据文件: ${dataPath}`
+    });
+    settingsContainer.createEl('p', {
+      text: `备份文件: ${backupPath}`
+    });
+    settingsContainer.createEl('p', {
+      cls: 'setting-item-description',
+      text: '数据自动保存在插件配置目录中，不会出现在笔记列表里。'
+    });
   }
 
   /**
