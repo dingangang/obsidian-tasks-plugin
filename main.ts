@@ -11,7 +11,6 @@ import { TodoSettingTab } from './src/settings/SettingTab';
 
 // 默认设置
 const DEFAULT_SETTINGS: TodoPluginSettings = {
-  todoFilePath: 'Todos.md',
   defaultPriority: 'medium',
   showCompleted: true,
   sortBy: 'dueDate',

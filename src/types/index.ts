@@ -23,7 +23,6 @@ export interface TodoItem {
  * 待办插件设置
  */
 export interface TodoPluginSettings {
-  todoFilePath: string;       // 待办数据文件路径
   defaultPriority: Priority;
   showCompleted: boolean;
   sortBy: 'dueDate' | 'priority' | 'createdAt' | 'title';
