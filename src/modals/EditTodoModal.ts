@@ -21,7 +21,6 @@ export class EditTodoModal extends Modal {
   private priorityBtns: HTMLElement[] = [];
   private dateInput: HTMLInputElement | null = null;
   private tasksSuggester: TasksSuggester | null = null;
-  private previewEl: HTMLElement;
   private component: Component;
 
   constructor(app: App, todoService: TodoService, todoId: string) {
@@ -68,19 +67,12 @@ export class EditTodoModal extends Modal {
     // 标题
     this.createTextField(contentEl, '标题', 'todo-title-input', '输入待办事项... (支持 Tasks 格式: 🔺 📅)', (value) => {
       this.title = value;
-      this.renderPreview();
     }, this.title, true);
 
     // 描述
     this.createTextArea(contentEl, '描述 (可选)', 'todo-desc-input', '添加详细描述... (支持 Tasks 格式)', (value) => {
       this.description = value;
-      this.renderPreview();
     }, this.description, true);
-
-    // 预览区域
-    contentEl.createEl('h3', { text: '预览' });
-    this.previewEl = contentEl.createDiv({ cls: 'todo-preview markdown-preview-view' });
-    this.renderPreview();
 
     // 优先级
     this.createPrioritySelect(contentEl);
@@ -421,60 +413,5 @@ export class EditTodoModal extends Modal {
         }
       }
     }
-  }
-
-  /**
-   * 渲染预览
-   */
-  private async renderPreview(): Promise<void> {
-    if (!this.previewEl) return;
-
-    this.previewEl.empty();
-
-    const fullContent = [
-      `- [ ] ${this.title || '标题'}`,
-      this.description || ''
-    ].join('\n\n');
-
-    await MarkdownRenderer.render(
-      this.app,
-      fullContent,
-      this.previewEl,
-      '',
-      this.component
-    );
-
-    // 处理复选框点击
-    const checkboxes = this.previewEl.querySelectorAll('input[type="checkbox"]');
-    checkboxes.forEach((checkbox, index) => {
-      checkbox.addEventListener('click', (e) => {
-        e.preventDefault();
-
-        // 如果是 Description 里的:
-        const descLines = this.description.split('\n');
-
-        if (index === 0) {
-          return;
-        }
-
-        let matchCount = 0;
-        let newDesc = this.description;
-
-        newDesc = newDesc.replace(/- \[( |x|X)\]/g, (match) => {
-          matchCount++;
-          if (matchCount === index) {
-            return match.includes('x') || match.includes('X') ? '- [ ]' : '- [x]';
-          }
-          return match;
-        });
-
-        if (newDesc !== this.description) {
-          this.description = newDesc;
-          const textarea = this.contentEl.querySelector('.todo-desc-input') as HTMLTextAreaElement;
-          if (textarea) textarea.value = newDesc;
-          this.renderPreview();
-        }
-      });
-    });
   }
 }

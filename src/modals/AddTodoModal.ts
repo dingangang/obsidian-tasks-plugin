@@ -20,7 +20,6 @@ export class AddTodoModal extends Modal {
   private priorityBtns: HTMLElement[] = [];
   private dateInput: HTMLInputElement | null = null;
   private tasksSuggester: TasksSuggester | null = null;
-  private previewEl: HTMLElement;
   private component: Component;
 
   constructor(app: App, todoService: TodoService, settings: TodoPluginSettings) {
@@ -52,19 +51,12 @@ export class AddTodoModal extends Modal {
     // 标题
     this.createTextField(contentEl, '标题', 'todo-title-input', '输入待办事项... (支持 Tasks 格式: 🔺 📅)', (value) => {
       this.title = value;
-      this.renderPreview();
     }, true);
 
     // 描述
     this.createTextArea(contentEl, '描述 (可选)', 'todo-desc-input', '添加详细描述... (支持 Tasks 格式)', (value) => {
       this.description = value;
-      this.renderPreview();
     }, true);
-
-    // 预览区域
-    contentEl.createEl('h3', { text: '预览' });
-    this.previewEl = contentEl.createDiv({ cls: 'todo-preview markdown-preview-view' });
-    this.renderPreview();
 
     // 优先级
     this.createPrioritySelect(contentEl);
@@ -398,92 +390,5 @@ export class AddTodoModal extends Modal {
         }
       }
     }
-  }
-
-  /**
-   * 渲染预览
-   */
-  private async renderPreview(): Promise<void> {
-    if (!this.previewEl) return;
-
-    this.previewEl.empty();
-
-    const fullContent = [
-      `- [ ] ${this.title || '标题'}`,
-      this.description || ''
-    ].join('\n\n');
-
-    await MarkdownRenderer.render(
-      this.app,
-      fullContent,
-      this.previewEl,
-      '',
-      this.component
-    );
-
-    // 处理复选框点击
-    const checkboxes = this.previewEl.querySelectorAll('input[type="checkbox"]');
-    checkboxes.forEach((checkbox, index) => {
-      // 第一个是标题的 checkbox（我们需要忽略它，因为我们在 Modal 里不让通过点击 checkbox 来完成新建）
-      // 或者我们可以让它 sync 回去？
-      // 用户想在“新建”时就看到效果。如果用户点击了标题的 checkbox，理论上也可以改 title 为 `- [x]`
-      // 但这里我们简单起见，主要针对 description 里的 checkbox
-
-      checkbox.addEventListener('click', (e) => {
-        e.preventDefault(); // 阻止默认行为，防止闪烁
-        const target = e.target as HTMLInputElement;
-        const isChecked = target.checked; // 这里的 checked 其实是点击后的状态（browser 处理后）
-        // 实际上对于 MarkdownRenderer 渲染的 checkbox，点击通常不会改变 DOM 状态，因为它是 static 的
-        // 我们需要根据点击位置来判断
-
-        // 简单实现：我们假设 description 里的 `- [ ]` 是用户想点的
-        // 这个实现在 preview 模式下比较 tricky，因为我们需要 map 回 source
-        // 简单版本：只通过 regex 替换
-
-        // 但用户需求是: 能够支持将“- [ ]” 渲染成复选框
-        // 我们至少要渲染出来。交互可能在 Add 阶段不是必须，但为了体验最好由交互。
-
-        // 让我们实现一个简单的 toggle 逻辑：
-        // 如果用户点了 description 里的 checkbox，我们尝试 toggle 对应文本
-
-        // 由于定位太麻烦，我们这里只做展示 Render 即可，或者简单提示。
-        // 但用户说 "输入“- [ ]”时，会激活语法将输入文本变成可点击的选择框"
-
-        // 实际上，如果只是 render 出来，用户点一下没反应会很奇怪。
-        // 让我们尝试做简单的 text replacement
-
-        // 如果是 Description 里的:
-        const descLines = this.description.split('\n');
-        // 这是一个极其简化的 mapping，假设 checkbox 顺序对应 lines 里的 `-[ ]` 顺序
-        // 标题占了一个 checkbox
-
-        if (index === 0) {
-          // 标题的 checkbox，暂时忽略或者处理
-          // 我们的 title 字段通常不包含 `- [ ]` 前缀，那是为了 preview 加上去的
-          return;
-        }
-
-        // description checkboxes
-        // 找到第 index - 1 个 checkbox 在 description 里的位置
-        let matchCount = 0;
-        let newDesc = this.description;
-
-        newDesc = newDesc.replace(/- \[( |x|X)\]/g, (match) => {
-          matchCount++;
-          if (matchCount === index) { // index 0 is title, so index 1 is first desc checkbox
-            return match.includes('x') || match.includes('X') ? '- [ ]' : '- [x]';
-          }
-          return match;
-        });
-
-        if (newDesc !== this.description) {
-          this.description = newDesc;
-          // 更新 textarea
-          const textarea = this.contentEl.querySelector('.todo-desc-input') as HTMLTextAreaElement;
-          if (textarea) textarea.value = newDesc;
-          this.renderPreview();
-        }
-      });
-    });
   }
 }

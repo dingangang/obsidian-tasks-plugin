@@ -23,3 +23,5 @@ data.json
 
 # Git worktrees
 .worktrees
+
+*.bak
